@@ -42,9 +42,13 @@ for k in config_device_volte_available config_carrier_volte_available; do
 done
 
 s "7. 运营商配置（按 Phone Id 分列）"
+# 注意 dumpsys 会输出多段：一段默认值 + 每个 Phone Id 一段。
+# 只看第一段极易把默认的 false 误判为根因 —— 本项目就踩过这个坑。
 adb shell 'dumpsys carrier_config 2>/dev/null' | awk '
-  /Phone Id *=/ { id=$0 }
-  /carrier_volte_available_bool|hide_enhanced_4g_lte_bool/ { print "  [" id "] " $0 }' | head -8
+  BEGIN { id="(默认段，非实际生效值)" }
+  /Phone Id *=/ { gsub(/^[ \t]+|[ \t]+$/, "", $0); id=$0 }
+  /carrier_volte_available_bool|hide_enhanced_4g_lte_bool/ {
+      gsub(/^[ \t]+/, "", $0); print "  " id " -> " $0 }' | head -8
 
 s "8. 用户开关"
 for k in volte_vt_enabled enhanced_4g_mode_enabled; do
@@ -52,8 +56,15 @@ for k in volte_vt_enabled enhanced_4g_mode_enabled; do
 done
 
 s "9. IMS 类型 APN 是否存在"
-adb shell 'content query --uri content://telephony/carriers --projection name,apn,type 2>/dev/null' \
-  | grep -i 'type=ims' | head -3 || echo "  未找到 ims 类型 APN"
+# 只查当前 SIM 的 MCC/MNC，否则会列出 ROM 预置的一大堆其它运营商 APN
+NUMERIC=$(adb shell getprop gsm.operator.numeric 2>/dev/null | tr -d '\r' | tr ',' '\n' | grep -E '^[0-9]+$' | head -1)
+if [ -n "$NUMERIC" ]; then
+  echo "  当前运营商 MCC/MNC: $NUMERIC"
+  adb shell "content query --uri content://telephony/carriers --where \"numeric=$NUMERIC\" --projection name,apn,type 2>/dev/null" \
+    | grep -i 'type=ims' | sed 's/^/  /' || echo "  ★ 该运营商无 ims 类型 APN"
+else
+  warn_no_sim=1; echo "  未读到 SIM 的 MCC/MNC（无卡？）"
+fi
 
 s "10. 实拨时走哪条通道   ImsPhoneCallTracker=VoLTE  GsmCdmaCallTracker=CS电路域"
 echo "  手动拨一通电话后运行:"
