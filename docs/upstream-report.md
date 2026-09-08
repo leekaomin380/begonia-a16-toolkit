@@ -1,35 +1,10 @@
-# 上游缺陷报告（待提交）
+Thanks for maintaining this device tree. I hit a reproducible issue on the LineageOS 23.2 build and traced it end-to-end, so I'm reporting it with the full diagnosis — I believe the blobs are declared but never actually extracted.
 
-这个缺陷的正确修复位置在 ROM 构建配置里——在 `proprietary-files.txt` 中补一行，
-让下一个构建自带 64 位库即可。对维护者来说是一行的事，却能让所有使用者受益。
+## Symptom
 
-## 提交渠道
+Outgoing calls stay in `DIALING` forever — no ringback, no connect, no error. Incoming calls fail too. SMS works in both directions. On a carrier with no 2G/3G left (China Unicom), this makes voice calls completely unusable.
 
-该构建的设备树未完整公开（`begonia-lineage` 组织最后更新停在 2023-02，
-无 Android 16 分支），因此没有可直接开 issue 的仓库。可用渠道：
-
-1. **XDA 原帖回复** —— 维护者在该帖中活跃回复过用户（如指纹问题）。最直接。
-   `[ROM][UNOFFICIAL] LineageOS 23.2 [Redmi Note 8 Pro/begonia]`
-2. **维护者的 Telegram 频道** `t.me/danascapeprojects`
-3. **内核仓库 issue** `WuXing90/begonia_kernel_dev` —— 严格说不对口（这是内核而非
-   proprietary-files），但可作为备选。
-
-## 报告正文（英文，可直接粘贴）
-
----
-
-**Subject: VoLTE broken — `libmtk_vt_wrapper.so` missing from `/system/lib64` (64-bit variant not packaged)**
-
-Thanks for the build. I hit a reproducible issue and traced it to a packaging problem,
-so I'm reporting it with the full diagnosis in case it's a one-line fix.
-
-**Symptom**
-
-Outgoing calls stay in `DIALING` forever — no ringback, no connect, no error. Incoming
-calls fail too. SMS works fine in both directions. On a carrier with no 2G/3G left
-(China Unicom), this means voice calls are completely unusable.
-
-**Root cause**
+## Root cause
 
 `com.mediatek.ims` crashes on startup and is stuck in a restart loop:
 
@@ -41,12 +16,15 @@ java.lang.UnsatisfiedLinkError: dlopen failed: library "libmtk_vt_wrapper.so" no
 
 ```
 $ adb shell dumpsys activity services com.mediatek.ims
-  * ServiceRecord{... com.mediatek.ims/.MtkDynamicImsService ...}
+  * ServiceRecord{... com.mediatek.ims/.MtkDynamicImsService c:com.android.phone}
     app=null
-  * Restarting ServiceRecord{... }
+  * Restarting ServiceRecord{...}
+
+$ adb shell ps -A | grep mediatek.ims
+(no output)
 ```
 
-The library is present, but only as the 32-bit variant:
+On device, only the 32-bit copy exists:
 
 ```
 $ adb shell find /system /vendor -name "libmtk_vt*"
@@ -55,58 +33,54 @@ $ adb shell find /system /vendor -name "libmtk_vt*"
 # nothing under /system/lib64/
 ```
 
-`com.mediatek.ims` has `primaryCpuAbi=null` (no bundled native libs), so it runs 64-bit
-on this `zygote64_32` device and cannot load the 32-bit `.so`.
+`com.mediatek.ims` has `primaryCpuAbi=null`, so on this `zygote64_32` device it runs 64-bit and cannot load the 32-bit `.so`. Because the load happens in a **static initializer**, the exception kills the whole process — taking MMTEL (voice) down with it, even though ViLTE is disabled (`persist.vendor.vilte_support=0`).
 
-Because the load happens in a **static initializer**, the exception kills the whole
-process — taking MMTEL (voice) down with it, even though ViLTE is disabled
-(`persist.vendor.vilte_support=0`).
+## Why I think it's an extraction problem, not a config one
 
-**Downstream effects**
-
-MMTEL feature never gets created → the Enhanced 4G LTE toggle is not rendered in
-Settings → the framework only polls `IMS_REGISTRATION_STATE` and never sends
-`SET_IMS_ENABLE` → dialing falls back to `GsmCdmaCallTracker` (`dialGsm`) → no CSFB
-available → call hangs in `DIALING`.
-
-Every layer above this looks healthy, which makes it easy to misdiagnose as a carrier
-config issue: `config_device_volte_available=true`, `carrier_volte_available_bool=true`,
-`hide_enhanced_4g_lte_bool=false`, IMS APNs present, `IRadio/imsAospSlot1/2` HALs
-running, ImsService correctly bound to `com.mediatek.ims`.
-
-**Suggested fix**
-
-Add the 64-bit variant to `proprietary-files.txt` (it exists in stock MIUI for this
-device, e.g. `V12.5.3.0.RGGIDXM`):
+`device_redmi_begonia/proprietary-files.txt` (branch `avium-16.2`) declares them correctly:
 
 ```
-system/lib64/libmtk_vt_wrapper.so
+998: system_ext/lib64/libmtk_vt_service.so:system/lib64/libmtk_vt_service.so|302d3ab3c5b3fa0107520fe36098b32cd0a8dd96
+999: system_ext/lib64/libmtk_vt_wrapper.so:system/lib64/libmtk_vt_wrapper.so|af4d486c516c920ea99c362aebbf04180e96035c
 ```
 
-Note that the stock blob has `DT_NEEDED` entries for `libhidltransport.so`,
-`libvcodec_cap.so` and `vendor.mediatek.hardware.videotelephony@1.0.so`, none of which
-exist on Android 16. As a local workaround I redirected those three `DT_NEEDED` entries
-to `liblog.so` (an existing dependency) without touching `.dynstr`, which is enough for
-`System.loadLibrary` to succeed. Since ViLTE is disabled, the VT code paths are never
-executed. A cleaner upstream fix might be to also ship the missing deps, or to guard the
-VT provider initialization behind the `vilte_support` property so it doesn't run at all.
+But `vendor_redmi_begonia/proprietary/system_ext/lib64/` (same branch) contains 41 blobs and **none of them match `vt` or `ims`**. The neighbouring `libimsma*.so` entries on lines 994–997 appear to be missing as well.
 
-**Verified after the workaround**
+So the entries are declared, the blobs were never committed, and the build completed silently without them.
+
+## Downstream chain
 
 ```
-ImsRegistrationTechnology: -1 -> 0 (LTE)
-call routing: dialGsm -> ImsPhoneCallTracker
-call states: ALERTING -> ACTIVE (call actually connects)
+missing lib64 blob
+  -> ImsVTProvider.<clinit> throws UnsatisfiedLinkError
+    -> com.mediatek.ims crash-loops (app=null + Restarting)
+      -> MMTEL feature never created
+        -> Enhanced 4G LTE toggle not rendered in Settings;
+           framework only polls IMS_REGISTRATION_STATE, never sends SET_IMS_ENABLE
+          -> dialing falls back to GsmCdmaCallTracker (dialGsm)
+            -> no CSFB available on this carrier
+              -> call hangs in DIALING
 ```
 
-Environment: LineageOS 23.2-20260328-UNOFFICIAL-begonia, Android 16 (API 36),
-China Unicom (46001).
+Every layer above this looks healthy, which makes it easy to misdiagnose as carrier config: `config_device_volte_available=true`, `carrier_volte_available_bool=true`, `hide_enhanced_4g_lte_bool=false`, IMS APNs present, `IRadio/imsAospSlot1/2` HALs running, ImsService correctly bound to `com.mediatek.ims`.
 
----
+## Workaround I verified
 
-## 提交前的检查
+Pulled the arm64 blob from a stock MIUI dump and installed it to `/system/lib64/`. The stock blob has `DT_NEEDED` entries for `libhidltransport.so`, `libvcodec_cap.so` and `vendor.mediatek.hardware.videotelephony@1.0.so`, none of which exist on Android 16, so I redirected those three entries to `liblog.so` (an existing dependency) without touching `.dynstr`. Since ViLTE is disabled, the VT code paths never execute — `System.loadLibrary` just needs to succeed.
 
-- 报告中不含任何设备标识（IMEI、手机号、序列号）
-- 语气：这是一个免费的社区构建，报告的目的是帮助修复而非索赔
-- 已提供完整的诊断证据和可操作的修复建议，这是维护者最难自行获得的部分
-  （他没有这台设备 + 该运营商环境的组合）
+Result:
+
+```
+ImsRegistrationTechnology: -1  ->  0 (LTE)
+call routing: dialGsm  ->  ImsPhoneCallTracker
+call states: ALERTING -> ACTIVE   (calls actually connect)
+```
+
+Tooling and the full write-up: https://github.com/leekaomin380/begonia-a16-toolkit
+
+## Suggestions
+
+1. Re-run `extract-files` and confirm the `system_ext/lib64` IMS/VT blobs actually land in the vendor repo — a silent skip here costs all voice functionality.
+2. Optionally, guard `ImsVTProviderUtil` initialization behind `vilte_support` so a missing VT blob can never take MMTEL down with it. That would make the failure mode degrade gracefully instead of catastrophically.
+
+Environment: LineageOS 23.2-20260328-UNOFFICIAL-begonia, Android 16 (API 36), China Unicom (46001). Happy to run any further diagnostics — I have the device.
