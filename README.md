@@ -65,6 +65,23 @@
 | `extract-blob.sh` | 从固件转储仓库按路径取单个文件，免下整包固件 | 高 |
 | `sdat2img.py` | BLOCK OTA 的 `.dat.br` + `transfer.list` → 裸镜像 | 高 |
 | `install-fix.sh` | 本机型的一键修复 | 低（机型专属） |
+| `provision.sh` | 刷机后的一次性配置：去预装、装应用、导素材、装 BCR | 低（含个人偏好） |
+
+## 换机复现
+
+```bash
+# 前置：bootloader 已解锁（新设备需绑定小米账号并等待 168 小时，无法脚本化）
+# 1. 刷入 ROM —— 见 docs/flashing-without-buttons.md
+# 2. 修复 VoLTE
+./tools/install-fix.sh
+# 3. 配置系统（可分阶段：prefs / debloat / apps / media / bcr）
+./tools/provision.sh
+```
+
+`provision.sh` 记录的是**决定**而非知识——删哪些应用、装哪些应用、要哪套素材。
+文档能记录「怎么做」，记录不了「你想要什么」。其中包含一条踩过的坑：
+**不要移除 `org.lineageos.twelve`**，它是系统里唯一的音频播放器，删掉后无法播放
+BCR 的 `.oga` 通话录音（本项目曾误删并装回）。
 
 ## 其它文档
 
