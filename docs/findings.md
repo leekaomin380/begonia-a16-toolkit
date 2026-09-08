@@ -18,6 +18,25 @@
 | 通话录音（手动） | 可用 | LineageOS 拨号器自带 |
 | 通话录音（自动） | 需装 BCR | 见 [system-app-without-magisk.md](system-app-without-magisk.md) |
 
+### 通话录音的音源（已实测）
+
+LineageOS 拨号器的 RRO 在本构建中已把录音开关覆盖为启用，且音源为 `VOICE_CALL(4)`
+而非源码默认的 `MIC(1)`：
+
+```console
+$ adb shell cmd overlay lookup com.android.dialer com.android.dialer:bool/call_recording_enabled
+true
+$ adb shell cmd overlay lookup com.android.dialer com.android.dialer:integer/call_recording_audio_source
+4
+```
+
+**注意：读源码默认值会得出相反结论**（LineageOS 上游默认是 `false` / `MIC`），
+必须用 `cmd overlay lookup` 查设备实际生效值。
+
+BCR 走同一条特权音源路径。实测一通真实来电录音，**通话双方声音均清晰可辨**——
+即 MTK 的音频 HAL 确实接受 `VOICE_CALL` 音源，不需要 root 或音源改写。
+录音参数：OGG/Opus 48kbps、16kHz 单声道（电话带宽）、零丢帧、零缓冲溢出。
+
 原帖的 `What's working` 把 Fingerprint 列为可用，**与实测不符**；`Known issues`
 栏原文是 "Need to check"，即未系统测试过。
 
