@@ -1,7 +1,13 @@
-# begonia A16 VoLTE 修复
+# begonia-a16-toolkit
+
+**Redmi Note 8 Pro (`begonia`) 在 Android 16 自定义 ROM 上的修复、诊断与刷机工具集。**
+
+核心内容是一个 VoLTE 故障的完整根因分析——该机型在 Android 16 上开箱**无法通话**。
+
+## 症状
 
 在 Redmi Note 8 Pro（`begonia`，MediaTek Helio G90T）的 Android 16 自定义 ROM 上，
-**拨出的电话永远停在 DIALING、既不振铃也不接通**。
+**拨出的电话永远停在 DIALING、既不振铃也不接通**。短信正常。
 
 根因不是配置，是 ROM 少打包了一个 64 位私有库：
 
@@ -65,6 +71,8 @@
 - [无按键刷机](docs/flashing-without-buttons.md) —— 音量键损坏时怎么刷，含三条已验证失效的路径
 - [不用 Magisk 安装系统特权应用](docs/system-app-without-magisk.md) —— 适用于标称 "requires root" 但实为"需系统权限"的项目
 - [begonia A16 实测状态](docs/findings.md) —— 哪些能用、哪些不能
+- [资源清单](docs/RESOURCES.md) —— 所有外部资源的出处与校验和，含免下整包固件的取法
+- [上游缺陷报告](docs/upstream-report.md) —— 可直接提交的英文报告正文
 
 ## 上游
 
